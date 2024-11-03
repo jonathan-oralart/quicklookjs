@@ -1,0 +1,505 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="UTF-8" />
+    <title>Object/Array Viewer</title>
+    <!-- React and Required Dependencies -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.development.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.development.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/date-fns/2.30.0/date-fns.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jotai/2.6.4/index.development.js"></script>
+
+    <style>
+        body,
+        html {
+            font-family: monospace;
+            height: 100%;
+            font-size: 12px;
+        }
+
+        .container {
+            width: 100%;
+            overflow-x: auto;
+        }
+
+        table {
+            border-collapse: collapse;
+            white-space: nowrap;
+            width: 100%;
+        }
+
+        table,
+        td,
+        th {
+            border: 1px solid gray;
+        }
+
+        td,
+        th {
+            padding: 2px 5px;
+            text-align: left;
+        }
+
+        th {
+            font-weight: bold;
+            background-color: #f2f2f2;
+            vertical-align: top;
+        }
+
+        .blue-wrapper {
+            border-top: 1px solid #4a6da7;
+            margin-bottom: 10px;
+            width: fit-content;
+        }
+
+        .blue-header {
+            background-color: #4a6da7;
+            height: 1.5em;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            padding: 0 5px;
+            color: white;
+            gap: 5px;
+            transition: background-color 0.2s ease;
+        }
+
+        .blue-header:hover {
+            background-color: #5a7db7;
+        }
+
+        .blue-header:active {
+            background-color: #3a5d97;
+        }
+
+        .blue-wrapper.collapsed>.content {
+            display: none;
+        }
+
+        .toggle-indicator {
+            display: inline-block;
+            width: 1em;
+            text-align: center;
+            transition: transform 0.2s;
+        }
+
+        .blue-wrapper.collapsed>.blue-header .toggle-indicator {
+            transform: rotate(-90deg);
+        }
+
+        .item-count {
+            margin-left: auto;
+        }
+
+        .blue-wrapper:not(.collapsed)>.blue-header .item-count {
+            display: none;
+        }
+
+        .blue-wrapper>.content {
+            display: block;
+        }
+
+        .number-cell {
+            color: #0066cc;
+            font-family: 'Consolas', 'Monaco', monospace;
+        }
+
+        .number-string-cell {
+            color: #006600;
+            font-family: 'Consolas', 'Monaco', monospace;
+        }
+
+        .string-cell {
+            color: #333;
+        }
+
+        .date-cell {
+            color: #008000;
+            font-style: italic;
+        }
+
+        .null-cell {
+            color: #999;
+            font-style: italic;
+        }
+
+        .slider-container {
+            margin-bottom: 20px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .slider-container input {
+            width: 200px;
+        }
+
+        .blue-header {
+            justify-content: flex-start;
+        }
+
+        .copy-button {
+            margin-left: auto;
+            cursor: pointer;
+            font-size: 16px;
+            padding: 0 5px;
+            opacity: 0;
+            transition: opacity 0.2s ease;
+        }
+
+        .blue-header:hover .copy-button {
+            opacity: 1;
+        }
+
+        .copy-button:hover {
+            background-color: rgba(255, 255, 255, 0.1);
+        }
+
+        .copy-button:active {
+            background-color: rgba(255, 255, 255, 0.2);
+        }
+
+        .array-table {
+            width: auto;
+            margin-left: auto;
+        }
+
+        td .array-table {
+            margin-right: 0;
+        }
+
+        .boolean-cell {
+            text-align: center;
+        }
+
+        .boolean-cell svg {
+            vertical-align: middle;
+        }
+
+        .undefined-cell {
+            color: #999;
+            font-style: italic;
+        }
+
+        .nan-cell {
+            color: #ff4500;
+            font-style: italic;
+        }
+
+        .empty-array {
+            color: #999;
+            font-style: italic;
+            padding: 2px 5px;
+        }
+
+        .empty-string {
+            color: #999;
+            padding: 2px 4px;
+            border-radius: 3px;
+        }
+
+        .string-cell a {
+            color: #0000ee;
+            text-decoration: underline;
+        }
+
+        .string-cell a:visited {
+            color: #551a8b;
+        }
+
+        .string-cell a:hover {
+            text-decoration: none;
+        }
+
+        .plain-string {
+            padding: 10px;
+            border: 1px solid #ccc;
+            background-color: #f8f8f8;
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+
+        .plain-date {
+            padding: 10px;
+            border: 1px solid #ccc;
+            background-color: #f0fff0;
+            color: #008000;
+            font-style: italic;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useCallback, useEffect } = React;
+        // const { atom, useAtom } = jotai;
+        const { parse, format } = dateFns;
+
+        // Atoms for global state
+        const showUndefinedAtom = atom(true);
+        const showEmptyStringsAtom = atom(true);
+
+        // Helper functions
+        const isISODate = (value) => {
+            return typeof value === 'string' && value.length >= 20 && value.length <= 29 &&
+                value[4] === '-' && value[7] === '-' && value[10] === 'T';
+        };
+
+        const formatDate = (value) => {
+            if (value instanceof Date) {
+                return format(value, 'EEE d MMM yyyy h:mma');
+            }
+            return format(parse(value, "yyyy-MM-dd'T'HH:mm:ss.SSSX", new Date()), 'EEE d MMM yyyy h:mma');
+        };
+
+        const formatPrimitive = (value) => {
+            const [showUndefined] = useAtom(showUndefinedAtom);
+            const [showEmptyStrings] = useAtom(showEmptyStringsAtom);
+
+            if (value === undefined) return showUndefined ? 'undefined' : '';
+            if (Number.isNaN(value)) return 'NaN';
+            if (value instanceof Date) return formatDate(value);
+            if (isISODate(value)) return formatDate(value);
+            if (value === '') return showEmptyStrings ? <span className="empty-string">""</span> : '';
+            if (typeof value === 'string') return makeUrlsClickable(value);
+            return value;
+        };
+
+        const makeUrlsClickable = (text) => {
+            const urlRegex = /(https?:\/\/[^\s]+)/g;
+            const parts = text.split(urlRegex);
+            return parts.map((part, index) => {
+                if (part.match(urlRegex)) {
+                    return (
+                        <a key={index} href={part} target="_blank" rel="noopener noreferrer">
+                            {part}
+                        </a>
+                    );
+                }
+                return part;
+            });
+        };
+
+        const getCellType = (content) => {
+            if (content === undefined) return 'undefined';
+            if (content === null) return 'null';
+            if (Number.isNaN(content)) return 'nan';
+            if (content instanceof Date) return 'date';
+            const type = typeof content;
+            if (type === 'number') return 'number';
+            if (type === 'boolean') return 'boolean';
+            if (type === 'string') {
+                if (isISODate(content)) return 'date';
+                if (/^-?\d+(\.\d+)?$/.test(content)) return 'number-string';
+                return 'string';
+            }
+            if (type === 'object') return 'complex';
+            return 'other';
+        };
+
+        const isObject = (value) => typeof value === 'object' && value !== null && !Array.isArray(value);
+        const isComplexType = (value) => typeof value === 'object' && value !== null;
+        const isPrimitive = (value) => !isComplexType(value);
+
+        const TableCell = ({ content, depth, defaultOpenLevels }) => {
+            const cellType = getCellType(content);
+            let cellContent;
+
+            switch (cellType) {
+                case 'complex':
+                    cellContent = renderContent(content, depth + 1, defaultOpenLevels);
+                    break;
+                case 'date':
+                case 'number':
+                case 'number-string':
+                case 'string':
+                case 'undefined':
+                case 'nan':
+                    cellContent = formatPrimitive(content);
+                    break;
+                case 'boolean':
+                    cellContent = content ? '✓' : '•';
+                    break;
+                default:
+                    cellContent = content === null ? 'null' : content;
+            }
+
+            return <td className={`${cellType}-cell`}>{cellContent}</td>;
+        };
+
+        const TableHeader = ({ content }) => <th>{content}</th>;
+
+        const PrimitiveArrayTable = ({ arr }) => (
+            <table className="array-table">
+                <tbody>
+                    <tr>
+                        {arr.map((item, index) => {
+                            const cellType = getCellType(item);
+                            return (
+                                <td key={index} className={`${cellType}-cell`}>
+                                    {formatPrimitive(item)}
+                                </td>
+                            );
+                        })}
+                    </tr>
+                </tbody>
+            </table>
+        );
+
+        const BlueHeader = ({ isArray, itemCount, isCollapsed, onToggle }) => (
+            <div className="blue-header" data-toggleable="true" onClick={onToggle}>
+                <span className="toggle-indicator">{isCollapsed ? '▶' : '▼'}</span>
+                {isArray ? 'Array ' : 'Object '}
+                <span className="item-count">{itemCount} items</span>
+            </div>
+        );
+
+        const CollapsibleWrapper = ({ children, depth, defaultOpenLevels, isArray, itemCount }) => {
+            const [isCollapsed, setIsCollapsed] = useState(depth >= defaultOpenLevels);
+
+            useEffect(() => {
+                setIsCollapsed(depth >= defaultOpenLevels);
+            }, [depth, defaultOpenLevels]);
+
+            const toggleCollapse = useCallback(() => {
+                setIsCollapsed(prev => !prev);
+            }, []);
+
+            return (
+                <div className={`blue-wrapper ${isCollapsed ? 'collapsed' : ''}`} data-depth={depth}>
+                    <BlueHeader isArray={isArray} itemCount={itemCount} isCollapsed={isCollapsed} onToggle={toggleCollapse} />
+                    <div className="content">{children}</div>
+                </div>
+            );
+        };
+
+        const renderContent = (value, depth, defaultOpenLevels) => {
+            if (Array.isArray(value)) return <ArrayTable arr={value} depth={depth} defaultOpenLevels={defaultOpenLevels} />;
+            if (isObject(value)) return <ObjectTable json={value} depth={depth} defaultOpenLevels={defaultOpenLevels} />;
+            return formatPrimitive(value);
+        };
+
+        const ArrayTable = ({ arr, depth = 0, defaultOpenLevels }) => {
+            if (arr.length === 0) return <div className="empty-array">[]</div>;
+            if (arr.every(isPrimitive)) return <PrimitiveArrayTable arr={arr} />;
+
+            const headers = Array.from(new Set(arr.flatMap(item => isObject(item) ? Object.keys(item) : ['Value'])));
+
+            return (
+                <CollapsibleWrapper depth={depth} defaultOpenLevels={defaultOpenLevels} isArray={true} itemCount={arr.length}>
+                    <table className="content">
+                        <thead>
+                            <tr>
+                                {headers.map((header, index) => (
+                                    <TableHeader key={`header-${index}`} content={header} />
+                                ))}
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {arr.map((item, rowIndex) => (
+                                <tr key={`row-${rowIndex}`}>
+                                    {headers.map((header, colIndex) => (
+                                        <TableCell
+                                            key={`cell-${rowIndex}-${colIndex}`}
+                                            content={isObject(item) ? item[header] : header === 'Value' ? item : ''}
+                                            depth={depth}
+                                            defaultOpenLevels={defaultOpenLevels}
+                                        />
+                                    ))}
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </CollapsibleWrapper>
+            );
+        };
+
+        const ObjectTable = ({ json, depth = 0, defaultOpenLevels }) => {
+            if (json === undefined) return <div>Error: Invalid JSON data</div>;
+            if (json === null) return <div>null</div>;
+            if (Array.isArray(json)) return <ArrayTable arr={json} depth={depth} defaultOpenLevels={defaultOpenLevels} />;
+
+            const entries = Object.entries(json);
+
+            return (
+                <CollapsibleWrapper depth={depth} defaultOpenLevels={defaultOpenLevels} isArray={false} itemCount={entries.length}>
+                    <table className="content">
+                        <tbody>
+                            {entries.map(([key, value], index) => (
+                                <tr key={`row-${index}`}>
+                                    <TableHeader content={key} />
+                                    <TableCell content={value} depth={depth} defaultOpenLevels={defaultOpenLevels} />
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </CollapsibleWrapper>
+            );
+        };
+
+        const GenerateJsObjectHtml = ({ jsonData, defaultOpenLevels = 2 }) => {
+            if (jsonData === undefined) return <div>Error: Invalid JSON data</div>;
+            if (jsonData === null) return <div>null</div>;
+            if (typeof jsonData === 'string') return <div className="plain-string">{jsonData}</div>;
+            if (jsonData instanceof Date) return <div className="plain-date">{formatDate(jsonData)}</div>;
+
+            return (
+                <div className="container">
+                    <ObjectTable json={jsonData} depth={0} defaultOpenLevels={defaultOpenLevels} />
+                </div>
+            );
+        };
+
+        const App = () => {
+            const [defaultOpenLevels, setDefaultOpenLevels] = useState(5);
+
+            // Example data - you can modify this
+            const sampleData = {
+                person: {
+                    name: "John Doe",
+                    age: 30,
+                    contacts: [
+                        { type: "email", value: "john@example.com" },
+                        { type: "phone", value: "123-456-7890" }
+                    ],
+                    birthday: new Date("1993-05-15"),
+                    website: "https://example.com",
+                    active: true
+                },
+                settings: {
+                    notifications: true,
+                    theme: "dark"
+                }
+            };
+
+            return (
+                <>
+                    <div className="slider-container">
+                        <label htmlFor="open-levels">Open Levels: {defaultOpenLevels}</label>
+                        <input
+                            type="range"
+                            id="open-levels"
+                            min="1"
+                            max="10"
+                            step="1"
+                            value={defaultOpenLevels}
+                            onChange={(e) => setDefaultOpenLevels(Number(e.target.value))}
+                        />
+                    </div>
+                    <GenerateJsObjectHtml jsonData={sampleData} defaultOpenLevels={defaultOpenLevels} />
+                </>
+            );
+        };
+
+        // Render the app
+        const container = document.getElementById('root');
+        const root = ReactDOM.createRoot(container);
+        root.render(<App />);
+    </script>
+</body>
+
+</html>
